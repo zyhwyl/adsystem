@@ -90,11 +90,15 @@ var Base = _ ={
 *
 */
 var CookieHelper = {
-	set: function(n, v, t, h, d){
-    var e = new Date();
-    e.setTime(e.getTime() + t*1000);
-    document.cookie = n + "=" + v + (t ? "; expires=" + e.toGMTString() : "") + (d ? "; domain="+d : "") + (h ? "; path="+h : "");
-  },
+	set: function(cookieName, cookieValue, hour, path, domain, secure) {
+		var expires = new Date();
+		expires.setTime(expires.getTime() + (hour+8)*1000*3600);
+		document.cookie = escape(cookieName) + '=' + escape(cookieValue)
+		+ (expires ? '; expires=' + expires.toGMTString() : '')
+		+ (path ? '; path=' + path : ';path=/')
+		+ (domain ? '; domain=' + domain : '')
+		+ (secure ? '; secure' : '');
+	},
   //获取cookie
   get: function (N){
     var m = new RegExp("(^| )" + N + "=([^;]*)(;|\x24)");
@@ -123,10 +127,10 @@ var TimeHelper = {
 */
 
 //广告显示类型
-AD_DISPLAY_TYPE = {
+var AD_DISPLAY_TYPE = {
 	NORMAL: 0,			//普通
 	FULLSCREEN: 1 	//全屏
-}
+},
 
 //广告位置标识
 AP_IDENTIFY = {
@@ -134,14 +138,83 @@ AP_IDENTIFY = {
 	"bottom": 1,
 	"left": 2,
 	"right": 3
-}
+},
+
+AP_POSITION = {
+	0: "inherit",
+	1: "absolute",
+	2: "fixed"
+},
 
 //广告位置类型
 AP_TYPE = {
 	"BYLOC": 0,		//通过位置来定位广告
 	"BYID": 1 		//通过页面打点div定位广告
+},
+
+//广告策略
+AD_STRATEGY_COOKIE = {
+	CLICK_OUTDATE: "jzb_ad_click_outdate"
+},
+
+AD_STRATEGY_LEVEL = { 
+	"-2": '未出生' ,
+	"-1": '未入园' ,
+	"0": '幼儿园' ,
+	"1": '一年级' ,
+	"2": '二年级' ,
+	"3": '三年级' ,
+	"4": '四年级' ,
+	"5": '五年级' ,
+	"6": '六年级' ,
+	"7": '初一' ,
+	"8": '初二' ,
+	"9": '初三' ,
+	"10": '高一' ,
+	"11": '高二' ,
+	"12": '高三' ,
+	"13": '大学及以上',
+	"999": '全部学段'
+},
+
+AD_STRATEGY_DISTRICK = {
+  'bj': "北京",
+  'tj': "天津",
+  'sjz': "石家庄",
+  'ty': "太原",
+
+  'sh': "上海",
+  'nj': "南京",
+  'su': "苏州",
+  'cz': "常州",
+  'wx': "无锡",
+  'hf': "合肥",
+  'hz': "杭州",
+  'nb': "宁波",
+  'fz': "福州",
+  'jn': "济南",
+  'qd': "青岛",
+
+  'sz': "深圳",
+  'gz': "广州",
+
+  'zz': "郑州",
+  'wh': "武汉",
+  'cs': "长沙",
+
+  'sy': "沈阳",
+  'dl': "大连",
+  'cc': "长春",
+
+  'cq': "重庆",
+  'cd': "成都",
+
+  'xa': "西安",
+
+  'qg': "全国" 
 }
-	
+;
+
 /**
 * 广告生成类，对模板进行渲染
 *
@@ -150,52 +223,152 @@ var AdGenerator = function(){
 }
 AdGenerator.prototype.getAd = function(o){
 	this.strategy = new AdStrategy();
-	this.position = new AdPosition(o.position,o.template);
+	this.position = new AdPosition(o.position);
+	this.obj = o;
 	this.dataList = o.dataList;
 	this.matched = false;
-	this.getHtml(this.dataList);
+	this.getAdEntity(this.dataList);
 }
-AdGenerator.prototype.getHtml = function(){
-	var _t = this.position.getTemplete();
-	document.children[0].appendChild(_t);
+AdGenerator.prototype.getAdEntity = function(){
+	this.adTempl = this.position.getTemplete();
+	if(this.adTempl){
+		if(this.position.isByLoc())
+			document.children[0].appendChild(this.adTempl);
+		for (var i = 0; i < this.dataList.length; i++) {
+			var _d = this.dataList[i],
+					_tList = _d.data,
+					_rAd = ~~(_tList.length*Math.random()),
+					_ad = _tList[_rAd];
 
-	for (var i = 0; i < this.dataList.length; i++) {
-		var _d = this.dataList[i],
-				_tList = _d.data;
-
-		//策略判断 若符合策略 则停止输出模板
-		if(this.strategy.isMatch(_d)){
-			var _rAd = ~~(_tList.length*Math.random());
-			_t.innerHTML = _tList[_rAd].html+"<style>"+_tList[_rAd].css+"</style>";
-			this.otherNodes = _.getSiblings(_t);
-
-			//事件绑定
-			if(_tList[_rAd].func && typeof _tList[_rAd].func === "function"){
-				var _this = this;
-				_tList[_rAd].func();
+			//策略判断 若符合策略 则停止输出模板
+			if(_ad&&this.strategy.isMatch(_ad.id,_d.districk,_d.level)){
+				this.getHtml(_ad);
+				break;
 			}
+		};
 
-			//是否全屏
-			if(_tList[_rAd].type == AD_DISPLAY_TYPE.FULLSCREEN){
-				this.toFullscreen();
-			}
-			this.matched = true;
-			break;
+		//显示默认广告
+		if(!this.matched){
+			var _rAd = ~~(this.obj.default.length*Math.random());
+			this.getHtml(this.obj.default[_rAd]);
 		}
-	};
+	}
+}
+AdGenerator.prototype.getHtml = function($ad){
+	//设置模板大小
+	this.position.setWrapSize($ad.template.width,$ad.template.height,this.isFullscreen($ad.type));
+	this.adTempl.innerHTML = $ad.html+"<style>"+$ad.css+"</style>";
+	this.otherNodes = _.getSiblings(this.adTempl);
+	
+	//事件绑定
+	if($ad.func && typeof $ad.func === "function"){
+		this.strategy.setClickOutdate($ad.clickOutdate);
+		$ad.func(this,$ad.id);
+	}
+
+	//是否全屏
+	if(this.isFullscreen($ad.type)){
+		this.toFullscreen();
+	}
+	this.matched = true;
+}
+AdGenerator.prototype.isFullscreen = function(type){
+	return  type == AD_DISPLAY_TYPE.FULLSCREEN;
 }
 AdGenerator.prototype.toFullscreen = function(){
-	// _.hide(document.body);
+	_.hide(document.body);
 }
-	
+AdGenerator.prototype.cancelFullscreen = function(){
+	_.show(document.body);
+}
+AdGenerator.prototype.removeAd = function(){
+	this.position.removeWrap();
+}
+
 /**
 * 广告策略类，进行策略判断
 *
 */
 var AdStrategy = function(){
+	this.clickOutDate = "";
 }
-AdStrategy.prototype.isMatch = function(s){
-	_.log(s);
+AdStrategy.prototype.isMatch = function(id,districk,level){
+	if(this.isClickOutdate(id) || !this.isMatchArea(districk,level))
+		return false;
+
+	return true;
+}
+AdStrategy.prototype.isLogin = function(){
+	//只在bbs站判断是否登录
+	if(location.href.match(/m.jzb.c\w{0,}\/bbs\//i)){
+		if((typeof userInfo.isLogin!="undefined")&&userInfo.isLogin) return true;
+	}else{
+		return false;
+	}
+}
+AdStrategy.prototype.isJzbApp = function(){
+	if(location.href.indexOf("m.jzb.c") >= 0)
+		return true;
+	return false;
+}
+AdStrategy.prototype.setClickOutdate = function(time){
+	this.clickOutDate = time;
+}
+AdStrategy.prototype.isClickOutdate = function(ad_id){
+	return CookieHelper.get(AD_STRATEGY_COOKIE.CLICK_OUTDATE) == ad_id;
+}
+AdStrategy.prototype.setClickCookie = function(ad_id){
+	if(this.clickOutDate!=-1)
+		CookieHelper.set(AD_STRATEGY_COOKIE.CLICK_OUTDATE,ad_id,this.clickOutDate);
+}
+AdStrategy.prototype.isMatchArea = function(districk,level){
+	//登录用户必须判断
+	if(this.isLogin()){
+		//只在家长帮web端判断
+		if(this.isJzbApp()&&this.districkMatch(userInfo.districk)&&this.levelMatch(userInfo.level)){
+			return true;
+		}else
+			return false;
+	}else{
+		//只在家长帮web端判断
+		if(this.isJzbApp()&&typeof f_tags!="undefined"
+				&&this.districkMatch(districk)&&this.levelMatch(level)){
+			return true;
+		}else
+			return false;
+	}
+	return true;
+}
+AdStrategy.prototype.areaMap= function(area,type){
+	var tmp = area.join(","),
+			tmpAreaMaps = (type==0)?AD_STRATEGY_DISTRICK:AD_STRATEGY_LEVEL;
+	for(var city in tmpAreaMaps){
+		tmp.replace(city,tmpAreaMaps[city]);
+	}
+	return tmp;
+}
+AdStrategy.prototype.districkMatch= function(tags){
+	if(tags != ""){
+		var _districk = this.areaMap(tags,0);
+		for(var city in AD_STRATEGY_DISTRICK){
+			if(_districk.indexOf(city) >= 0){
+				return true;
+			}
+		}
+		return false;
+	}
+	return true;
+}
+AdStrategy.prototype.levelMatch= function(tags){
+	if(tags != ""){
+		var _level = this.areaMap(tags,1);
+		for(var city in AD_STRATEGY_LEVEL){
+			if(_level.indexOf(city) >= 0){
+				return true;
+			}
+		}
+		return false;
+	}
 	return true;
 }
 
@@ -205,28 +378,43 @@ AdStrategy.prototype.isMatch = function(s){
 */
 var AdPosition = function(p,t){
 	this.dataP = p;
-	this.dataT = t;
-	if(p.type == AP_TYPE.BYLOC){
+	if(this.isByLoc()){
 		this.wrap = document.createElement("div");
-	}else if(p.type == AP_TYPE.BYID){
+	}else if(this.isById()){
 		this.wrap = _.getById(p.loc);
 	}else{
 		this.wrap = document.createElement("div");
 	}
+	this.wrap.setAttribute("jzb_ad","1");
 }
-
+AdPosition.prototype.isByLoc = function(){
+	return this.dataP.type == AP_TYPE.BYLOC;
+}
+AdPosition.prototype.isById = function(){
+	return this.dataP.type == AP_TYPE.BYID;
+}
+AdPosition.prototype.removeWrap = function(){
+	this.removeWrapSize();
+	return document.children[0].removeChild(this.wrap);
+}
 AdPosition.prototype.getTemplete = function(){
 	this.getWrap();
 	return this.wrap;
 }
+AdPosition.prototype.setWrapSize = function(w,h,is_full){
+	this.wrap.style.width = w;
+	this.wrap.style.height = h;
+	if(this.isByLoc()&&!is_full)
+		document.body.setAttribute("style",(document.body.getAttribute("style")||"")+"padding-"+this.dataP.loc+":"+h);
+}
+AdPosition.prototype.removeWrapSize = function(w,h){
+	if(this.isByLoc())
+		document.body.setAttribute("style",(document.body.getAttribute("style")||"")+"padding-"+this.dataP.loc+":0");
+}
 AdPosition.prototype.getWrap = function(){
-	if(this.dataP.type == AP_TYPE.BYLOC){
+	if(this.isByLoc()){
 		this.wrap.setAttribute("style","background:none;position:fixed;z-index:999999;");
-		this.wrap.style.height = this.dataT.height;
-		this.wrap.style.width = this.dataT.width;
 		this.setLocation(AP_IDENTIFY[this.dataP.loc]);
-	}else if(this.dataP.type == AP_TYPE.BYID){
-
 	}
 }
 AdPosition.prototype.setLocation = function(loc){
@@ -277,51 +465,3 @@ var AdEngine = (function(){
 window.AdEngine = AdEngine;
 
 })(window);
-
-AdEngine.startup({
-	site: {
-		name: "webapp" //站点名字
-	},
-	position: {       //位置信息
-     description: "顶部广告",  //位置方向通过文字进行描述
-     loc: "top",  
-     type: 0       // 0 传位置，1为传ID  
-	},
-	dataList: [ 
-	  {                           		//投放策略
-	    outdate: "timestamp",         //过期时间(-1为永不过期)
-	    districk: [],                 //地区(999为所有地区)
-	    level: [],                    //学段(999为所有学段)
-	    clickOutdate: 100,    //点击之后多久不显示 (-1为永久显示)
-	    data: [												//物料数据
-        {
-          html: [
-							    '<div class="back" id="adWrap">',
-							    '<img src="http://img.eduuu.com/website/public_js/jzb/img/mobile-logo.png" alt="" class="mobile_logo">',
-							    '<div class="btns">',
-							    '<a id="down_btn" href="javascript:;">下载家长帮</a>',
-							    '<a id="float2_close" style="background:#bbc6ca;" href="javascript:;">浏览网页版</a>',
-							    '</div></div>'
-							  ].join(''),
-    			css:  ".back{z-index:99999;background:#d8e9fc no-repeat;background-image:url(http://img.eduuu.com/website/public_js/jzb/img/mobile_landing_back.jpg);background-position:center bottom;position:fixed;height:100%;width:100%;background-size:100%;text-align:center;}.btns_wrap{position:relative;padding-bottom:20px;}.btns{text-align:center;}.btns a{display:block;width:150px;padding:12px 0;color:#fff;cursor:pointer;margin:10px auto;background:#099cd6;border-radius:50px;text-decoration:none;text-shadow:none;}.btns a:active{opacity:0.5;}.jzb_phone{width:100%;}.mobile_logo{width:40%;margin:50px auto 10px auto;}",
-			    func: function(){float2_close.onclick = function(){adWrap.style.display = "none";}},
-          type: 1
-        }
-      ]
-	  }
-	],
-	default: [
-		{
-	   html: ['<div class="layer"></div><div class="ad_wrap_float" id="ad_wrap_float"><div class="ad_wrap_top"><div class="ad_font"><div class="trans_back">e度手机论坛客户端</div><h5 style="font-size:24px;color:#fff;margin-top:15px;">升学重要信息<span style="color:#ffea00;font-size:32px">实时推送</span></h5>        </div>      <img class="back" src="http://img.eduuu.com/website/public_js/jzb/img/back.png" alt="">     <img class="close_btn" src="http://img.eduuu.com/website/public_js/jzb/img/close.png" alt="">   </div>  <div class="ad_wrap_bottom">        <img src="http://img.eduuu.com/website/public_js/jzb/img/down_load.png" alt=""><span style="color:#39ac83;font-size:32px;">立即下载</span><span style="color:#39ac83;font-size:18px;">(3.5M)</span></div></div>'].join(''),
-	   css:".ui-body-c, .ui-overlay-c{text-shadow:none;}  .layer{position:fixed;width:100%;height:100%;background:#ccc;z-index:9999;top:0;} .ad_wrap_float{width:100%;margin:0 auto;height: 360px;background:#39ac83;position:fixed;z-index:99999;top:0;}   .ad_wrap_top{float:left;width: 100%;height:90%;text-align: center;position:relative;}   .ad_wrap_bottom{float:left;width: 100%;background:#fff;text-align: center;padding:20px 0;font-size:20px;}   .ad_wrap_bottom img{position:relative;top:4px;left:-5px;}   .back{width:260px;bottom:0;position:absolute;}  .close_btn{position:absolute;right:15px;width:28px;top:10px;}   .ad_font{padding-top:40px;text-align: center;width:100%;}   .trans_back{background:rgba(0,0,0,0.1);width:240px;padding:8px 0;border-radius:10px;font-size:22px;color:#fff;margin:0 auto;}",
-	   func:"",
-	   weight: 1,
-	   type: 0 
-	  }
-  ],
-	template: {   //模板
-	 width: "100%",  //模板高度 例：100px-像素 100%-百分比 
-	 height: "100%"  //模板宽度 例：100px-像素 100%-百分比 
-	}
-});
-
